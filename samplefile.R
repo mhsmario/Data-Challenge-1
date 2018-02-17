@@ -1,3 +1,5 @@
 #This is an example
 
-print("Hello")
+print("Hello.")
+
+print("This is another line")
