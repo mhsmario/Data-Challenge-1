@@ -1,0 +1,370 @@
+---
+title: "DataChallenge2 | Mario Saraiva (mhs2195)"
+author: "Mario Saraiva (mhs2195)"
+date: "3/20/2018"
+output:
+  html_document:
+    fig_caption: true
+    number_sections: no
+    toc: yes
+    toc_float: yes
+---
+
+<!-- ##About this Project -->
+<!-- # File-Name:      Data_Challenge_1_MarioSaraiva.Rmd -->
+<!-- # Version:        R 3.4.1 -->
+<!-- # Date:           March 20, 2018
+<!-- # Author:         Mario Saraiva
+<!-- # Purpose:        Verify the lethality index with reported figures reported by the NY Times in 2016 that said: " `86.1% of dead civilians` who presumably participated in confrontations with federal armed forces were killed in events of "perfect lethality" where there were only dead and no wounded. [...] Mexico has the terrible situation of having `lethality indices of 2.6`. The lethality index of the Federal Police is `2.6 dead for every wounded`, the Navy's reaches 17.3 dead for every wounded, and the Army's is 9.1 dead for every wounded." (Ahmed & Schmitt, 2016) -->
+<!-- # Input Files:    1. AllViolenceData_171220.csv -->
+<!-- # Output Files:   Data_Challenge_2_MarioSaraiva.html -->
+<!-- # Data Output:    None -->
+<!-- # Previous files: None -->
+<!-- # Dependencies:   None -->
+<!-- # Required by:    None -->
+<!-- # Status:         IN PROGRESS -->
+<!-- # Machine:        Mac laptop -->
+
+<p> GR5069 - TOPICS IN APPLIED DATA SCIENCE
+FOR SOCIAL SCIENTISTS - Spring 2018 </p>
+
+<p> March 20, 2018 </p>
+
+
+```{r}
+options(java.parameters = "-Xmx5g")
+```
+
+```{r Libraries, warning=FALSE, message=FALSE, echo=FALSE}
+#Clear all previous output
+rm(list = ls())
+
+library(rJava)
+
+#Libraries used in this project
+library(readr)
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(VIM)
+library(mice)
+library(glmnet)
+library(pander)
+library(bartMachine)
+library(lattice)
+library(caret)
+library(stargazer)
+library(gam)
+library(flam)
+library(bartMachine)
+library(tree)
+library(ISLR)
+library(RColorBrewer)
+library(ggfortify)
+library(scales)
+library(mice)
+```
+
+
+```{r Load Main Data, warning=FALSE, message=FALSE, echo=FALSE}
+#Load the data
+dta <- read_csv("/Volumes/KINGSTON/MDP_2018/Applied Data Science/Data-Challenge-1-master/Data Challenge 1/data/processed/AllViolenceData_171220.csv")
+
+#dim(dta)
+#str(dta)
+```
+
+```{r Poverty Data, warning=FALSE, message=FALSE, echo=FALSE}
+pov <- read_excel("/Volumes/KINGSTON/MDP_2018/Applied Data Science/Data-Challenge-1-master/Data Challenge 2/Data/Processed/Poverty05_10.xlsx")
+
+#Source: https://www.coneval.org.mx/Medicion/IRS/Paginas/%C3%8Dndice-de-Rezago-social-2010.aspx
+#Source: http://www.coneval.org.mx/Medicion/Documents/Pobreza_municipal/Concentrado_indicadores_de_pobreza.zip 
+
+colnames(pov)[4] <- "municipality"
+colnames(pov)[2] <- "state"
+colnames(pov)[12] <- "Access.Health.Services.pct"
+colnames(pov)[7] <- "Poverty.Pct.2010"
+colnames(pov)[8] <- "X.Poverty.Pct.2010"
+colnames(pov)[9] <- "Mod.Poverty.Pct.2010"
+colnames(pov)[10] <- "Vulnerables.SocialCare.Pct.2010"
+colnames(pov)[11] <- "Educ.Lag.Pct.2010"
+
+dta.pov <- inner_join(dta, pov, by = c("municipality", "state"))
+
+dta.pov$Level.Social.Lag.2005 <- as.factor(dta.pov$Level.Social.Lag.2005)
+#Note 1062 obs were lost in the merge...
+```
+
+#Data Challenge 2
+
+##Q.1
+
+<center>
+
+`Is there an association between Poverty/development levels, Lethality index, and number of deaths per conflict? I hypothesis that there is a difference between Perfect Lethality rate between poor and non-poor states in Mexico.`
+
+</center>
+
+
+
+###Lasso
+
+Lasso regression is run on perfect_lethality against all  numeric variables in our dataset: 
+  
+__Interpreting the Lasso Graph:__
+
+The colored line represents the value taken by a different coefficient in model 1. Lambda is the weight given to the regularization term (the L1 norm), so as lambda approaches zero, the loss function of your model approaches the OLS loss function. As lambda becomes larger, the regularization term has a greater effect and you will see fewer variables in your model. Our ideal lambda is the one that minimizes the residuals. In this case, a log of lambda of approximately -5 seems to be appropriate, as seen in the subsequent graph with MSE.
+
+
+```{r, warning=FALSE, message=FALSE}
+#Remove variables not suited for Lasso:
+# [5] "state"                          
+# [6] "state_abbr"
+# [8] "municipality"
+# [45] "source"                         
+# [46] "organized_crime_lethality"      
+# [47] "army_lethality"                 
+# [48] "navy_lethality"                 
+# [49] "federal_police_lethality" 
+# [54] "organized_crime_NewIndex"       
+# [55] "army_NewIndex"                  
+# [56] "navy_NewIndex"                  
+# [57] "federal_police_NewIndex" 
+# [59] "category" 
+# [60] "global_id" 
+# [64] "Level.Social.Lag.2005"
+
+
+### We first set up x and y
+slim.dta.pov <- dta.pov[,-c(1,2,5,6,8,45,46,47,48,49,54,55,56,57,59,60,62,64)]
+
+slim.dta.pov <- na.omit(slim.dta.pov)
+
+set.seed(12345) # = Seed for replication
+
+x <- model.matrix(perfect_lethality ~ ., data = slim.dta.pov)[,-46]
+y <- slim.dta.pov$perfect_lethality
+ 
+### We then fit a Lasso regression model (alpha = 1)
+fit.lasso <- glmnet(x, y, alpha = 1, family = "gaussian")
+plot(fit.lasso, xvar = "lambda", label = TRUE)
+ 
+### Now we cross-validate
+cv.lasso <- cv.glmnet(x, y)
+plot(cv.lasso)
+```
+
+Cross-Validation plot suggests that the model works best when it has approximately 5 predictors. We can use cross-validation to extract coefficients that collectively minimize mean squared error.
+ 
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+set.seed(12345) # = Seed for replication
+
+### Extract coefficients corresponding to lambda.min (minimum mean cross-validated error)
+min.coef <- coef(cv.lasso, s = "lambda.min")
+
+#print(min.coef)
+```
+
+ 
+Below are the 18 predictors of Perfect Lethality that collectively minimize mean squared error. Out of 70 variables, only 18 seem to be ideal candidates for predictors of perfect lethality.
+
+Num | Variable                  | Lasso coefficient    |
+----|---------------------------|----------------------|
+1   | detained                  |       -0.0003073193  |
+2   | military_dead             |       -0.0184931882  |
+3   | ministerial_police_dead   |       -0.0074495572  |
+4   | municipal_police_dead     |       -0.0166922238  |
+5   | civilian_dead             |       -0.0001098928  |
+6   | total_people_wounded      |       -0.0037244742  |
+7   | military_wounded          |       -0.0074350113  |
+8   | navy_wounded              |       -0.0081752818  |
+9   | small_arms_seized         |        0.0030058344  |
+10  | army                      |        0.1096297637  |
+11  | ministerial_police        |       -0.0286733220  |
+12  | municipal_police          |       -0.0784595966  |
+13  | navy                      |        0.0298730962  |
+14  | other                     |       -0.0166464452  |
+15  | state_police              |       -0.0492937858  |
+16  | organized_crime_lethality_diff |   0.1175320252  |
+17  | Vulnerables.SocialCare.Pct.2010 |      -0.0000926747  |
+18  | Access.Health.Services.pct |       0.0006595007  |
+
+
+###Regressing perfect lethality on significant predictors
+```{r, warning=FALSE, message=FALSE}
+### Regression with all variables
+model.1 <- glm(perfect_lethality ~ detained + military_dead + ministerial_police_dead + municipal_police_dead + civilian_dead + total_people_wounded + military_wounded + navy_wounded + small_arms_seized + army + ministerial_police + municipal_police + navy + other + state_police + organized_crime_lethality_diff + `Vulnerables.SocialCare.Pct.2010` + Access.Health.Services.pct, family = binomial(link="logit"), data = dta.pov)
+
+summary(model.1)
+```
+
+Interpretation:
+
+Only the statistically significant coefficients will be addressed.
+
+It is the estimated amount by which the log odds of leaves.presence would increase if Area were one unit higher.
+  
+1. Total_people_wounded: On average, a one unit increase in the total people wounded ratio is associated with a __decrease__ in the log odds __of 0.541004__ of having a perfect lethality event.
+  
+2. Army: On average, the presence of the army is associated with a __increase__ in the log odds __0.660978__ of having a perfect lethality event.
+  
+3. Organized_crime_lethality_diff: On average, a one unit increase in the difference in organized crime lethality is associated with a __increase__ in the log odds __of 2.541381__of having a perfect lethality event. 
+  
+The first three coefficients are statistically significant at the 0.000 level. In other words, the results we see are unlikely to be caused by luck. The following to coefficients are fairly weak statistically speaking but they present substantive insights. 
+  
+4. Military_dead: On average, each additional death in the military is associated with a __decrease__ in the log odds __of 0.6252574__ of having a perfect lethality event.           
+  
+5. Access.Health.Services.pct: On average, each additional death in the military is associated with a __increase__ in the log odds __of 0.009524__ of having a perfect lethality event.
+  
+
+###Visualization
+
+Graph 3 illustrates a substantive (although not surprising) finding.  Municipalities that have precarious access to health services (less than 50%) have a higher log odds of having a perfect lethality event, as seen by the red horizontal line.
+
+```{r, warning=FALSE, message=FALSE}
+set.seed(12345)
+ypredict <- predict(model.1, type = "response")
+
+plot(ypredict, dta.pov$Access.Health.Services.pct, pch = 16, xlab="Perfect Lethality", ylab="% Access to Health Services", title("Graph 3: Perfect Lethality events and Municipal Access to Health Services"), cex = .5)
+abline(h = 50, v = .5, col = "red")
+```
+
+
+Graph 4 further supports our finding from the logit regression.
+
+```{r, warning=FALSE, message=FALSE}
+plot.gg <- ggplot(dta.pov)
+
+plot.gg + geom_bar(aes(dta.pov$perfect_lethality, fill = cut(Access.Health.Services.pct,3)))  + ggtitle("Graph 4: Num. of Perfect Lethality cases and % Access to Health Service") + xlab("perfect lethality ") + ylab("Count of Perfect Lethality events") + facet_wrap(~cut(Access.Health.Services.pct,3)) + scale_fill_manual( values=c("#E69F00", "#56B4E9", "#999999"),
+                       name="Municipal Access to Health Services",
+                       labels=c("Up to 35% access to HS", "Between 35.1% and 65% access to HS", "Above 65% access to HS"))
+
+```
+
+
+```{r, echo=FALSE}
+# plot.gg + geom_bar(aes(dta.pov$perfect_lethality, fill =cut(total_people_dead, 3)))  + ggtitle("Graph XX: Num. of Perfect Lethality cases and Total Num. of Dead") + xlab("Total Number of Dead ") + ylab("Perfect Lethality") + facet_wrap(~cut(total_people_dead, 3)) + scale_fill_manual( values=c("#E69F00", "#56B4E9", "#999999"),
+#                        name="Total number of Dead")
+```
+
+Graph 5 explores the relationship between the index for social development ( Índice de Rezago Social [^1] [^2]) with  perfect lethality events. Once again, we see that the lower levels of social development are associated with higher perfect lethality cases.
+
+[^1]: `Given that the General Law of Social Development establishes that the measurement of poverty must consider the multidimensional nature of poverty, CONEVAL constructed the Social Lag Index, incorporating indicators of education, access to health services, basic services, quality and spaces in the home, and assets in the home. The Social Recession Index is a weighted measure that summarizes four indicators of social deprivation (education, health, basic services and spaces in housing) in a single index that aims to order observation units according to their social needs.
+  
+[^2]: Source: https://www.coneval.org.mx/Medicion/IRS/Paginas/Que-es-el-indice-de-rezago-social.aspx 
+
+```{r, warning=FALSE, message=FALSE}
+plot.gg + geom_bar(aes(dta.pov$perfect_lethality, fill = dta.pov$Level.Social.Lag.2005))  + ggtitle("Graph 5: Num. of Perfect Lethality cases and Poverty levels") + xlab("Shortage of Health Service in % ") + ylab("Perfect Lethality")  + facet_wrap(~dta.pov$Level.Social.Lag.2005) + scale_fill_discrete(name = "Level of Social Lag")
+
+ # + scale_fill_manual( values=c("#E69F00", "#56B4E9", "#999999"),
+ #                       name="Poverty Level",
+ #                       labels=c("Up to 36% are poor", "Between 36.1% and 67% are poor", "Above 67% are poor"))
+```
+
+###Discussion 
+
+
+__Insight:__
+  
+My initial hypothesis was confirmed and significant evidence was found supporting that there is a statistically significant difference between the perfect lethality in municipalities with low levels of socioeconomic development to those with high development.
+  
+__Limitations:__
+
+Although our model seems to capture a significant portion of the variance in the dataset, it is important to remember that the dataset itself is not representative of the reality and it does not capture context. 
+
+##Q.2
+
+`Are we able to predict if an event had perfect lethality from the coeeficients not relating to death from in Model 1?`
+
+###Predictions with Lasso Coef.
+
+Num | Variable                  | 
+----|---------------------------|
+9   | detained                  |
+11  | military_dead             |
+16  | ministerial_police_dead   |
+17  | municipal_police_dead     |
+20  | civilian_dead             |
+21  | total_people_wounded      |
+22  | military_wounded          |
+23  | navy_wounded              |
+24  | small_arms_seized         |
+38  | army                      |
+40  | ministerial_police        |
+41  | municipal_police          |
+42  | navy                      |
+43  | other                     |
+44  | state_police              |
+46  | organized_crime_lethality_diff |
+68  | Vulnerables.SocialCare.Pct.2010 |
+70  | Access.Health.Services.pct | 
+
+  
+```{r, warning=FALSE, message=FALSE}
+#Choose only Lasso coefficients
+set.seed(11101)
+dataset1 <- dta.pov[,c(1,9,11,16,17,20,21,22,23,24,38,40,41,42,43,44,68,70)]
+
+dataset1[1] <- as.factor(dta.pov$perfect_lethality)
+colnames(dataset1)[1] <- "perfect_lethality"
+
+aggr(dataset1, plot = FALSE, col = c('navyblue','red'), numbers = TRUE, sortVars = TRUE, labels = names(dataset1), prop = FALSE) #confirming all NA's have been removed.
+```
+
+
+We slit training and testing at 3/4 and 1/4 respectively.
+```{r, warning=FALSE, message=FALSE}
+in_train <- createDataPartition(y = dataset1$perfect_lethality, p = 3 / 4, times = 1, list = FALSE)
+training1 <- dataset1[ in_train, ]
+testing1  <- dataset1[-in_train, ]
+
+#Compare
+dim(training1)
+dim(testing1)
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+options(java.parameters = "-Xmx5g")
+set_bart_machine_num_cores(parallel::detectCores())
+
+training1 <- as.data.frame(training1)
+#Bart machine for classification then y must be a factor otherwise it will assume regression.
+yvar <- training1$perfect_lethality
+bart <- bartMachine(training1[,2:18], yvar, mem_cache_for_speed = FALSE) 
+
+bart
+```
+
+```{r, warning=FALSE, message=FALSE}
+testing1 <- data.frame(testing1)
+pred1 <- predict(bart, testing1[,2:18], type = "class")
+
+table(pred1)
+
+confusionMatrix(pred1, testing1$perfect_lethality)
+
+df <- as.data.frame(matrix(c(0.9167,0.2852), nrow = 1, ncol = 2))
+
+#colnames(df)[1] <- "Results"
+colnames(df)[1] <- "Sensitivity"
+colnames(df)[2] <- "Specificity"
+```
+
+###Discussion (Insights and Limitations)
+
+The predictors found in lasso were not able to generate good classifications when used with BartMachine. The accuracy of predictions was approximately 75%. The model does fairly well classifying non-perfect lethality events (Sensitivity of 0.9116 ) but does poorly when trying to classify perfect lethality events (specificity of 0.3230).
+
+```{r}
+ggplot(df) + geom_point(aes(Sensitivity, Specificity, cex = 30)) + ylim(0:1) +xlim(0:1) + geom_vline(aes(xintercept = .5, color = "red")) + geom_hline(aes(yintercept=.5, color = "red")) + guides(color=FALSE, cex = FALSE) + theme(axis.title.x = element_text(face="bold", colour="#990000", size=20),
+           axis.text.x  = element_text(angle=90, vjust=0.5, size=16), axis.title.y = element_text(face="bold", colour="#990000", size=20)) + ggtitle("Results: \nClassification Model Accuracy = 0.747")
+```
+
+##Conclusion
+
+It seems from both the glm and Bartmachine models that there are extreme cases of violence that are easier to predict if they will have a perfect lethality rate or not. However, there are some characteristics of events that makes it hard to classify, probably these events have many homogeneous characteristics. The limitations of this project are that it is still unclear which characteristics are better at predicting perfect lethality. 
+
+----------
+
+
+
