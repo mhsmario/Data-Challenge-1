@@ -1,0 +1,296 @@
+---
+title: "Data Challenge 3 | Mario Saraiva (mhs2195)"
+author: "Mario Saraiva (mhs2195)"
+date: "4/16/2018"
+output:
+  html_document:
+    fig_caption: true
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+---
+
+<!-- ##About this Project -->
+<!-- # File-Name:      Data_Challenge_3_MarioSaraiva.Rmd -->
+<!-- # Version:        R 3.4.1 -->
+<!-- # Date:           April 16, 2018
+<!-- # Author:         Mario Saraiva
+<!-- # Purpose:        Verify the lethality index with reported figures reported by the NY Times in 2016 that said: " `86.1% of dead civilians` who presumably participated in confrontations with federal armed forces were killed in events of "perfect lethality" where there were only dead and no wounded. [...] Mexico has the terrible situation of having `lethality indices of 2.6`. The lethality index of the Federal Police is `2.6 dead for every wounded`, the Navy's reaches 17.3 dead for every wounded, and the Army's is 9.1 dead for every wounded." (Ahmed & Schmitt, 2016) -->
+<!-- # Input Files:    1. AllViolenceData_171220.csv -->
+<!-- # Output Files:   Data_Challenge_3_MarioSaraiva.html -->
+<!-- # Data Output:    None -->
+<!-- # Previous files: None -->
+<!-- # Dependencies:   None -->
+<!-- # Required by:    None -->
+<!-- # Status:         IN PROGRESS -->
+<!-- # Machine:        Mac laptop -->
+
+<p> GR5069 - TOPICS IN APPLIED DATA SCIENCE
+FOR SOCIAL SCIENTISTS - Spring 2018 </p>
+
+<p> April 16, 2018 </p>
+
+
+###Guidelines
+
+Formulate two (2) conditional hypotheses that you seek to investigate with the data. 
+1. ( ) One of your hypotheses should condition on two variables (as the example on the slides) [50 pts], and 
+ 
+2. ( ) The other should condition on three variables. [50 pts]
+ 
+3. ( ) formulate each one of your hypotheses explicitly in substantive terms (as opposed to statistical terms) using 2-3 lines at most
+ 
+4. ( ) show exactly how each one of your hypotheses translates into the marginal effect that you will seek to estimate from the data
+ 
+5. ( ) show the output from your analysis in a consumable form
+ 
+6. ( ) show all your computations to estimate the corresponding marginal effect and 
+ 
+7. ( ) also show its standard error
+ 
+8. ( ) be explicit in your assumptions
+  
+9. ( ) be explicit in the limitations of your inferences
+
+phrase your finding for each question in two ways:
+ 
+10. ( ) one sentence that summarizes your insight
+ 
+11. ( ) one paragraph that reflects all nuance in your insight
+ 
+12. ( ) make sure to also include your code
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Libraries, warning=FALSE, message=FALSE, echo=FALSE}
+#Clear all previous output
+rm(list = ls())
+
+#Libraries used in this project
+library(readr)
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(VIM)
+library(mice)
+library(glmnet)
+library(pander)
+library(RColorBrewer)
+library(ggfortify)
+library(scales)
+library(mice)
+```
+
+```{r Load Main Data, warning=FALSE, message=FALSE, echo=FALSE}
+#Load the data
+dta <- read_csv("/Volumes/KINGSTON/MDP_2018/Applied Data Science/Data-Challenge-1-master/Data Challenge 1/data/processed/AllViolenceData_171220.csv")
+
+#dim(dta)
+#str(dta)
+```
+
+```{r Poverty Data, warning=FALSE, message=FALSE, echo=FALSE}
+pov <- read_excel("/Volumes/KINGSTON/MDP_2018/Applied Data Science/Data-Challenge-1-master/Data Challenge 2/Data/Processed/Poverty05_10.xlsx")
+
+#Source: https://www.coneval.org.mx/Medicion/IRS/Paginas/%C3%8Dndice-de-Rezago-social-2010.aspx
+#Source: http://www.coneval.org.mx/Medicion/Documents/Pobreza_municipal/Concentrado_indicadores_de_pobreza.zip 
+
+colnames(pov)[4] <- "municipality"
+colnames(pov)[2] <- "state"
+colnames(pov)[12] <- "Access.Health.Services.pct"
+colnames(pov)[7] <- "Poverty.Pct.2010"
+colnames(pov)[8] <- "X.Poverty.Pct.2010"
+colnames(pov)[9] <- "Mod.Poverty.Pct.2010"
+colnames(pov)[10] <- "Vulnerables.SocialCare.Pct.2010"
+colnames(pov)[11] <- "Educ.Lag.Pct.2010"
+
+dta.pov <- inner_join(dta, pov, by = c("municipality", "state"))
+
+dta.pov$Level.Social.Lag.2005 <- as.factor(dta.pov$Level.Social.Lag.2005)
+#Note 1062 obs were lost in the merge...
+```
+
+## Goal
+
+The goal of this project is to assess the following two hypothesis regarding the relationship between access to health services, the number of civilians wounded and the total number of municipal police wounded.
+
+<center>
+__Hypothesis 1__
+
+Given a municipality with an __acceptable level of access to Health Services__ 
+(that is at least 50% of residents have access to health services) and the
+__the number of deaths of municipal police officers__ in the violent event, what is the marginal effect on the
+the number of civilians dead?
+
+</center>
+
+<center>
+
+__Hypothesis 2__
+
+Given a municipality with an acceptable level of access to Health Services, the 
+__presence of the municipal police__  in the violent event and that
+__long-guns were sized__, what is the marginal effect on the number of municipal
+police wounded?
+
+</center>
+
+__Note__: *This project will build upon the inferential analysis from Data Challenge #2.*
+```{r, warning=FALSE, message=FALSE}
+
+#Lasso regression is run on perfect_lethality against all  numeric variables in our dataset: 
+  
+# __Interpreting the Lasso Graph:__
+# 
+# The colored line represents the value taken by a different coefficient in model 1. Lambda is the weight given to the regularization term (the L1 norm), so as lambda approaches zero, the loss function of your model approaches the OLS loss function. As lambda becomes larger, the regularization term has a greater effect and you will see fewer variables in your model. Our ideal lambda is the one that minimizes the residuals. In this case, a log of lambda of approximately -5 seems to be appropriate, as seen in the subsequent graph with MSE.
+
+#Remove variables not suited for Lasso:
+# [5] "state"                          
+# [6] "state_abbr"
+# [8] "municipality"
+# [45] "source"                         
+# [46] "organized_crime_lethality"      
+# [47] "army_lethality"                 
+# [48] "navy_lethality"                 
+# [49] "federal_police_lethality" 
+# [54] "organized_crime_NewIndex"       
+# [55] "army_NewIndex"                  
+# [56] "navy_NewIndex"                  
+# [57] "federal_police_NewIndex" 
+# [59] "category" 
+# [60] "global_id" 
+# [64] "Level.Social.Lag.2005"
+
+
+### We first set up x and y
+slim.dta.pov <- dta.pov[,-c(1,2,5,6,8,45,46,47,48,49,54,55,56,57,59,60,62,64)]
+
+slim.dta.pov <- na.omit(slim.dta.pov)
+
+set.seed(12345) # = Seed for replication
+
+x <- model.matrix(perfect_lethality ~ ., data = slim.dta.pov)[,-46]
+y <- slim.dta.pov$perfect_lethality
+ 
+### We then fit a Lasso regression model (alpha = 1)
+fit.lasso <- glmnet(x, y, alpha = 1, family = "gaussian")
+#plot(fit.lasso, xvar = "lambda", label = TRUE)
+ 
+### Now we cross-validate
+cv.lasso <- cv.glmnet(x, y)
+#plot(cv.lasso)
+#
+#Cross-Validation plot suggests that the model works best when it has approximately 5 predictors. We can use cross-validation to extract coefficients that collectively minimize mean squared error.
+```
+ 
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+set.seed(12345) # = Seed for replication
+
+### Extract coefficients corresponding to lambda.min (minimum mean cross-validated error)
+min.coef <- coef(cv.lasso, s = "lambda.min")
+
+#print(min.coef)
+
+# Below are the 18 predictors of Perfect Lethality that collectively minimize mean squared error. Out of 70 variables, only 18 seem to be ideal candidates for predictors of perfect lethality.
+# 
+# Num | Variable                  | Lasso coefficient    |
+# ----|---------------------------|----------------------|
+# 1   | detained                  |       -0.0003073193  |
+# 2   | military_dead             |       -0.0184931882  |
+# 3   | ministerial_police_dead   |       -0.0074495572  |
+# 4   | municipal_police_dead     |       -0.0166922238  |
+# 5   | civilian_dead             |       -0.0001098928  |
+# 6   | total_people_wounded      |       -0.0037244742  |
+# 7   | military_wounded          |       -0.0074350113  |
+# 8   | navy_wounded              |       -0.0081752818  |
+# 9   | small_arms_seized         |        0.0030058344  |
+# 10  | army                      |        0.1096297637  |
+# 11  | ministerial_police        |       -0.0286733220  |
+# 12  | municipal_police          |       -0.0784595966  |
+# 13  | navy                      |        0.0298730962  |
+# 14  | other                     |       -0.0166464452  |
+# 15  | state_police              |       -0.0492937858  |
+# 16  | organized_crime_lethality_diff |   0.1175320252  |
+# 17  | Vulnerables.SocialCare.Pct.2010 |      -0.0000926747  |
+# 18  | Access.Health.Services.pct |       0.0006595007  |
+```
+
+
+###Hypothesis 1
+```{r, warning=FALSE, message=FALSE}
+dta.pov$Access.to.Health <- as.factor(cut(dta.pov$Access.Health.Services.pct, 2, labels = c("Poor", "Acceptable")))
+
+
+### Regression with all variables
+model.1 <- lm(civilian_dead ~  Access.to.Health*dta.pov$municipal_police_dead +  detained  + total_people_wounded + military_wounded + navy_wounded + small_arms_seized + army + ministerial_police + municipal_police + navy + state_police + Vulnerables.SocialCare.Pct.2010 + Access.Health.Services.pct, family = "binomial", data = dta.pov)
+
+summary(model.1)
+```
+
+Results:
+
+1. Given a municipality with an __acceptable level of access to Health Services__  and the
+__the number of deaths of municipal police officers__ in the violent event, the coefficient of the
+interaction was 0.1359452.  The result was not statistically significant nor was 
+it substantive. But the result is not yet the desired marginal effect. The marginal
+effect is calculated by
+
+$$\beta_{Municipal Police Dead} + \beta_{Municipal Police * Access to Health Services} \\
+  0.0635513 + 0.1359452 = 0.1994965
+$$ So for every violent event in a municipality with an acceptable access to health services, given the number of municipal police officers dead, the marginal effect on the total number of civilians dead is 0.1994. Then for every 5 municipal police officers dead in these municipalities, 1 civilian is dead. 
+
+To calculate the appropriate standard errors we apply the equation:
+
+$$Var\big[\hat{\beta_{X}}\big] + Z^{2}Var\big[\hat\beta_{XZ}\big] + 2ZCov\big[\hat\beta_{X},\hat\beta_{XZ}\big]$$
+ __The main take away is that the marginal effect on the number of municipal police wounded, given the above conditions, is negative and very small__ 
+
+  
+```{r}
+dta2.pov <- dta.pov %>%
+  group_by(state) %>%
+  summarise(avg. = mean(dta.pov$federal_police_dead), avg.health = mean(Access.Health.Services.pct))
+
+dta2.pov$access_to_health <- cut(dta2.pov$avg.health, 5, labels = c("Lowest", "Low", "Medium","high", "Very High"))
+
+#Order values in ascending order.
+# dta2.pov <- dta2.pov[order(dta2.pov$avg.health), ]
+# dta2.pov$access_to_health <- factor(dta2.pov$access_to_health, levels=unique(as.character(dta2.pov$access_to_health)) )
+
+ggplot(dta2.pov) + geom_col(aes(state, access_to_health, fill = access_to_health)) +
+  coord_flip() + ggtitle("Access to Health Services by State")
+
+dta2.pov$avg2 <- cut(dta2.pov$avg., 4, c("Lowest", "Low", "Medium","high"))
+
+#pander(table(dta2.pov$access_to_health, dta2.pov$avg2))
+```
+
+
+###Hypothesis 2
+```{r}
+### Regression with all variables
+model.2 <- lm(civilian_dead ~  Access.to.Health*dta.pov$municipal_police_dead*long_guns_seized +  detained  + total_people_wounded + military_wounded + navy_wounded + small_arms_seized + army + ministerial_police + municipal_police + navy + state_police + Vulnerables.SocialCare.Pct.2010 + Access.Health.Services.pct, family = "binomial", data = dta.pov)
+
+summary(model.2)
+```
+
+Results:
+
+2.Given a municipality with an __acceptable level of access to Health Services__, the
+__the numer of dead of municipal police officers__ and __the number of long-guns seized__ in the violent event, the coefficient of the
+interaction was -0.2530620.  The result was not statistically significant nor was it substantive. The actual marginal effect is calculated by
+
+$$\beta_{Municipal Police Dead} + \beta_{long-guns seized} + \beta_{Municipal Police * Access to Health Services * long-guns seized} \\
+  0.0673517 + 0.0036668 + (-0.2530620) = -0.1820435$$ 
+  
+So for every violent event in a municipality with an acceptable access to health services, given the number of municipal police officers dead and the number of long-gun seized, the marginal effect on the total number of civilians dead was negative (around -0.182). 
+
+__The main take away__ is that the marginal effect on the number of municipal police wounded, given the above conditions, is negative and very small. In other words, in comparison with our previous result when long-guns are seized there is a decrease in the number of dead civilians in municipalities with an acceptable access to Health Services. 
+
+###Discussion 
+
+__Limitations:__
+
+Interactions are tricky to interpret and analyze because they require significant support from the research literature supporting (or justifying) the use of interactions. In this case, no significant theory was associated with the interaction, but an interaction was produced to demonstrate one can sometimes include an interaction without the theoretical support and still find small statistical significance as seen in our Model 1. 
+
