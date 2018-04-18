@@ -224,9 +224,9 @@ dta.pov$Access.to.Health <- as.factor(cut(dta.pov$Access.Health.Services.pct, 2,
 
 
 ### Regression with all variables
-model.1 <- lm(civilian_dead ~  Access.to.Health*dta.pov$municipal_police_dead +  detained  + total_people_wounded + military_wounded + navy_wounded + small_arms_seized + army + ministerial_police + municipal_police + navy + state_police + Vulnerables.SocialCare.Pct.2010 + Access.Health.Services.pct, family = "binomial", data = dta.pov)
+ols_interaction <- lm(civilian_dead ~  Access.to.Health*dta.pov$municipal_police_dead +  detained  + total_people_wounded + military_wounded + navy_wounded + small_arms_seized + army + ministerial_police + municipal_police + navy + state_police + Vulnerables.SocialCare.Pct.2010 + Access.Health.Services.pct, family = "binomial", data = dta.pov)
 
-summary(model.1)
+summary(ols_interaction)
 ```
 
 Results:
@@ -237,13 +237,36 @@ interaction was 0.1359452.  The result was not statistically significant nor was
 it substantive. But the result is not yet the desired marginal effect. The marginal
 effect is calculated by
 
-$$\beta_{Municipal Police Dead} + \beta_{Municipal Police * Access to Health Services} \\
-  0.0635513 + 0.1359452 = 0.1994965
-$$ So for every violent event in a municipality with an acceptable access to health services, given the number of municipal police officers dead, the marginal effect on the total number of civilians dead is 0.1994. Then for every 5 municipal police officers dead in these municipalities, 1 civilian is dead. 
+$$\beta_{Municipal Police Dead} + \beta_{Municipal Police * Access to Health Services} \\ 0.0635513 + 0.1359452 = 0.1994965
+$$ This is further confirmed with the code below:
+
+```{r}
+beta <- coef(ols_interaction)                # extracts a vector of betas
+varcov <- as.matrix(vcov(ols_interaction))   # extracts estimated covariance matrix
+var <- diag(vcov(ols_interaction))           # extracts a vector with variances
+
+mfx_1 <- as.numeric(beta["dta.pov$municipal_police_dead"]) + 
+         as.numeric(beta["Access.to.HealthAcceptable:dta.pov$municipal_police_dead"])
+mfx_1
+```
+
+So for every violent event in a municipality with an acceptable access to health services, given the number of municipal police officers dead, the marginal effect on the total number of civilians dead is 0.1994. Then for every 5 municipal police officers dead in these municipalities, 1 civilian is dead. 
 
 To calculate the appropriate standard errors we apply the equation:
 
 $$Var\big[\hat{\beta_{X}}\big] + Z^{2}Var\big[\hat\beta_{XZ}\big] + 2ZCov\big[\hat\beta_{X},\hat\beta_{XZ}\big]$$
+
+```{r}
+mfx_1_se <- sqrt(
+            var["dta.pov$municipal_police_dead"] + 
+            var["Access.to.HealthAcceptable:dta.pov$municipal_police_dead"] +
+            varcov["dta.pov$municipal_police_dead", "Access.to.HealthAcceptable:dta.pov$municipal_police_dead"]
+            )
+mfx_1_se
+```
+
+The standard errors are (-0.06648099 , 0.4654739).
+
  __The main take away is that the marginal effect on the number of municipal police wounded, given the above conditions, is negative and very small__ 
 
   
@@ -270,9 +293,9 @@ dta2.pov$avg2 <- cut(dta2.pov$avg., 4, c("Lowest", "Low", "Medium","high"))
 ###Hypothesis 2
 ```{r}
 ### Regression with all variables
-model.2 <- lm(civilian_dead ~  Access.to.Health*dta.pov$municipal_police_dead*long_guns_seized +  detained  + total_people_wounded + military_wounded + navy_wounded + small_arms_seized + army + ministerial_police + municipal_police + navy + state_police + Vulnerables.SocialCare.Pct.2010 + Access.Health.Services.pct, family = "binomial", data = dta.pov)
+ols_interaction2 <- lm(civilian_dead ~  Access.to.Health*dta.pov$municipal_police_dead*long_guns_seized +  detained  + total_people_wounded + military_wounded + navy_wounded + small_arms_seized + army + ministerial_police + municipal_police + navy + state_police + Vulnerables.SocialCare.Pct.2010 + Access.Health.Services.pct, family = "binomial", data = dta.pov)
 
-summary(model.2)
+summary(ols_interaction2)
 ```
 
 Results:
@@ -283,8 +306,30 @@ interaction was -0.2530620.  The result was not statistically significant nor wa
 
 $$\beta_{Municipal Police Dead} + \beta_{long-guns seized} + \beta_{Municipal Police * Access to Health Services * long-guns seized} \\
   0.0673517 + 0.0036668 + (-0.2530620) = -0.1820435$$ 
+
+```{r}
+beta2 <- coef(ols_interaction2)                # extracts a vector of betas
+varcov2 <- as.matrix(vcov(ols_interaction2))   # extracts estimated covariance matrix
+var2 <- diag(vcov(ols_interaction2))           # extracts a vector with variances
+
+mfx_2 <- as.numeric(beta2["dta.pov$municipal_police_dead"]) + 
+         as.numeric(beta2["Access.to.HealthAcceptable:dta.pov$municipal_police_dead:long_guns_seized"])
+mfx_2
+```
+
   
 So for every violent event in a municipality with an acceptable access to health services, given the number of municipal police officers dead and the number of long-gun seized, the marginal effect on the total number of civilians dead was negative (around -0.182). 
+
+```{r}
+mfx_2_se <- sqrt(
+            var2["dta.pov$municipal_police_dead"] + 
+            var2["Access.to.HealthAcceptable:dta.pov$municipal_police_dead:long_guns_seized"] +
+            varcov2["dta.pov$municipal_police_dead", "Access.to.HealthAcceptable:dta.pov$municipal_police_dead:long_guns_seized"]
+            )
+mfx_2_se
+```
+
+The standard errors are (-1.14071, 0.7692892).
 
 __The main take away__ is that the marginal effect on the number of municipal police wounded, given the above conditions, is negative and very small. In other words, in comparison with our previous result when long-guns are seized there is a decrease in the number of dead civilians in municipalities with an acceptable access to Health Services. 
 
